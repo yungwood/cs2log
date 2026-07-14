@@ -97,9 +97,18 @@ func (t *Tracker) apply(event cs2log.Event) {
 		t.context.Map = e.Map
 		t.context.Phase = PhaseLoading
 	case cs2log.WorldMatchStart:
+		if t.isDuplicateEarlyMatchStart(e.Map) {
+			t.context.Map = e.Map
+			return
+		}
+		gameCommencingAt := t.context.GameCommencingAt
+		preserveGameCommencingAt := t.shouldPreserveGameCommencingForMatchStart()
 		t.resetMatch()
 		t.context.Map = e.Map
 		t.context.MatchStartedAt = timePtr(timestamp)
+		if preserveGameCommencingAt {
+			t.context.GameCommencingAt = gameCommencingAt
+		}
 		t.context.Phase = PhaseLoading
 	case cs2log.WorldGameCommencing:
 		t.context.ScoreT = 0
@@ -222,6 +231,29 @@ func (t *Tracker) resetMatch() {
 	t.context.RoundStartedAt = nil
 	t.context.RoundEndedAt = nil
 	t.context.GameOverAt = nil
+}
+
+func (t *Tracker) isDuplicateEarlyMatchStart(mapName string) bool {
+	return t.context.MatchStartedAt != nil &&
+		t.context.Map == mapName &&
+		t.context.GameCommencingAt != nil &&
+		!t.context.GameCommencingAt.After(*t.context.MatchStartedAt) &&
+		t.hasNoRealMatchProgression()
+}
+
+func (t *Tracker) shouldPreserveGameCommencingForMatchStart() bool {
+	return t.context.GameCommencingAt != nil && t.hasNoRealMatchProgression()
+}
+
+func (t *Tracker) hasNoRealMatchProgression() bool {
+	return !t.context.RoundLive &&
+		!t.context.GameOver &&
+		t.context.RoundStartedAt == nil &&
+		t.context.RoundEndedAt == nil &&
+		t.context.ScoreT == 0 &&
+		t.context.ScoreCT == 0 &&
+		t.context.RoundsPlayed <= 0 &&
+		t.context.RoundNumber == 0
 }
 
 func timePtr(value time.Time) *time.Time {
