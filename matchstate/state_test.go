@@ -196,6 +196,46 @@ func TestTrackerMatchLifecycleTimestamps(t *testing.T) {
 	}
 }
 
+func TestTrackerKeepsMatchStartedAtForDuplicateEarlyWorldMatchStart(t *testing.T) {
+	tracker := NewTracker()
+
+	matchAt := time.Date(2026, 7, 5, 12, 32, 29, 868000000, time.UTC)
+	duplicateAt := time.Date(2026, 7, 5, 12, 32, 36, 19000000, time.UTC)
+	commencingAt := matchAt
+
+	tracker.Push(stream.Record{Event: cs2log.WorldGameCommencing{BaseEvent: baseAt("WorldGameCommencing", commencingAt)}})
+	tracker.Push(stream.Record{Event: cs2log.WorldMatchStart{
+		BaseEvent: baseAt("WorldMatchStart", matchAt),
+		Map:       "de_cache",
+	}})
+	tracker.Push(stream.Record{Event: cs2log.MatchStatusScore{
+		BaseEvent:    baseAt("MatchStatusScore", matchAt),
+		ScoreCT:      0,
+		ScoreT:       0,
+		Map:          "de_cache",
+		RoundsPlayed: -1,
+	}})
+	tracker.Push(stream.Record{Event: cs2log.FreezeTimeStart{BaseEvent: baseAt("FreezeTimeStart", duplicateAt)}})
+
+	record := tracker.Push(stream.Record{Event: cs2log.WorldMatchStart{
+		BaseEvent: baseAt("WorldMatchStart", duplicateAt),
+		Map:       "de_cache",
+	}})
+
+	if record.Context.MatchStartedAt == nil || !record.Context.MatchStartedAt.Equal(matchAt) {
+		t.Fatalf("match started at = %v, want %v", record.Context.MatchStartedAt, matchAt)
+	}
+	if record.Context.GameCommencingAt == nil || !record.Context.GameCommencingAt.Equal(commencingAt) {
+		t.Fatalf("game commencing at = %v, want %v", record.Context.GameCommencingAt, commencingAt)
+	}
+	if record.Context.Phase != PhaseFreezetime {
+		t.Fatalf("phase = %q, want %q", record.Context.Phase, PhaseFreezetime)
+	}
+	if record.Context.LastEventAt == nil || !record.Context.LastEventAt.Equal(duplicateAt) {
+		t.Fatalf("last event at = %v, want %v", record.Context.LastEventAt, duplicateAt)
+	}
+}
+
 func TestTrackerRoundEndReasonFromTeamNotice(t *testing.T) {
 	tracker := NewTracker()
 	roundEndAt := time.Date(2026, 7, 5, 0, 0, 1, 0, time.UTC)
@@ -342,6 +382,35 @@ func TestTrackerClearsPreviousMatchStateOnWorldMatchStart(t *testing.T) {
 	assertFreshMatchContext(t, record.Context, "cs_agency")
 	if record.Context.MatchStartedAt == nil || !record.Context.MatchStartedAt.Equal(matchAt) {
 		t.Fatalf("match started at = %v, want %v", record.Context.MatchStartedAt, matchAt)
+	}
+}
+
+func TestTrackerResetsSameMapWorldMatchStartAfterProgression(t *testing.T) {
+	tracker := NewTracker()
+
+	firstMatchAt := time.Date(2026, 7, 5, 0, 0, 1, 0, time.UTC)
+	roundStartAt := time.Date(2026, 7, 5, 0, 0, 2, 0, time.UTC)
+	nextMatchAt := time.Date(2026, 7, 5, 0, 0, 3, 0, time.UTC)
+
+	tracker.Push(stream.Record{Event: cs2log.WorldMatchStart{
+		BaseEvent: baseAt("WorldMatchStart", firstMatchAt),
+		Map:       "de_train",
+	}})
+	tracker.Push(stream.Record{Event: cs2log.WorldRoundStart{BaseEvent: baseAt("WorldRoundStart", roundStartAt)}})
+	tracker.Push(stream.Record{Event: cs2log.TeamPlaying{
+		BaseEvent: baseAt("TeamPlaying", roundStartAt),
+		Side:      cs2log.SideTerrorist,
+		TeamName:  "Old T",
+	}})
+
+	record := tracker.Push(stream.Record{Event: cs2log.WorldMatchStart{
+		BaseEvent: baseAt("WorldMatchStart", nextMatchAt),
+		Map:       "de_train",
+	}})
+
+	assertFreshMatchContext(t, record.Context, "de_train")
+	if record.Context.MatchStartedAt == nil || !record.Context.MatchStartedAt.Equal(nextMatchAt) {
+		t.Fatalf("match started at = %v, want %v", record.Context.MatchStartedAt, nextMatchAt)
 	}
 }
 
